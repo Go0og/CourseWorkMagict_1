@@ -11,8 +11,8 @@ class BBox(BaseModel):
     Attributes:
         x_min: Left edge coordinate (>= 0).
         y_min: Top edge coordinate (>= 0).
-        x_max: Right edge coordinate (strictly > x_min).
-        y_max: Bottom edge coordinate (strictly > y_min).
+        x_max: Right edge coordinate (> 0, strictly greater than x_min).
+        y_max: Bottom edge coordinate (> 0, strictly greater than y_min).
     """
 
     x_min: int = Field(ge=0)
