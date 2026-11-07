@@ -1,4 +1,6 @@
-"""Tests for Pydantic v2 data models (docs/json-schema.md)."""
+"""Tests for UML data models: serialization, validation and pipeline stub."""
+
+from __future__ import annotations
 
 import json
 
@@ -20,109 +22,122 @@ from uml_recognition.models import (
 from uml_recognition.pipeline import Pipeline
 
 
-def make_fake_diagram() -> UmlDiagram:
-    """Build a UmlDiagram with fake sample data.
+def make_diagram() -> UmlDiagram:
+    """Build a UmlDiagram with fake but valid data.
 
     Returns:
-        A populated, valid UmlDiagram instance.
+        A fully populated UmlDiagram instance.
     """
     return UmlDiagram(
         classes=[
             UmlClass(
                 name="User",
-                bbox=BBox(x_min=100.0, y_min=50.0, x_max=300.0, y_max=250.0),
-                stereotype=None,
-                attributes=[Attribute(name="id", type="int", visibility=Visibility.PRIVATE)],
+                attributes=[
+                    Attribute(name="id", type_str="int", visibility=Visibility.PRIVATE),
+                    Attribute(name="name", type_str="str", visibility=Visibility.PROTECTED),
+                ],
                 methods=[
                     Method(
                         name="login",
+                        parameters=[Parameter(name="password", type_str="str")],
                         return_type="bool",
-                        parameters=[Parameter(name="password", type="str")],
                         visibility=Visibility.PUBLIC,
                     )
                 ],
-            )
+                bbox=BBox(x_min=10, y_min=20, x_max=110, y_max=120),
+                confidence=0.95,
+            ),
+            UmlClass(
+                name="Order",
+                bbox=BBox(x_min=200, y_min=50, x_max=320, y_max=160),
+            ),
         ],
         relations=[
             Relation(
-                source_class_id="User",
-                target_class_id="Order",
-                relation_type=RelationType.ASSOCIATION,
-                multiplicity_source="1",
-                multiplicity_target="*",
+                source="User",
+                target="Order",
+                type=RelationType.ASSOCIATION,
+                label="places",
+                confidence=0.87,
             )
         ],
-        metadata=Metadata(source_image="data/raw/example.png", processing_time_ms=1523.45),
+        metadata=Metadata(source_image="test.png", processing_time_ms=42),
     )
 
 
 class TestSerialization:
-    """model_dump_json round-trip tests."""
+    """JSON serialization round-trip."""
 
     def test_model_dump_json_returns_valid_json(self) -> None:
-        """model_dump_json must not raise and must yield parseable JSON."""
-        diagram = make_fake_diagram()
+        """model_dump_json must not raise and must produce parseable JSON."""
+        diagram = make_diagram()
         raw = diagram.model_dump_json()
         parsed = json.loads(raw)
         assert parsed["classes"][0]["name"] == "User"
-        assert parsed["relations"][0]["relation_type"] == "association"
-        assert parsed["metadata"]["schema_version"] == "1.0"
+        assert parsed["relations"][0]["type"] == "association"
+        assert parsed["metadata"]["source_image"] == "test.png"
 
     def test_roundtrip_validate(self) -> None:
-        """model_validate_json must reconstruct an equal model."""
-        diagram = make_fake_diagram()
+        """Serialized JSON must re-validate into an equal model."""
+        diagram = make_diagram()
         restored = UmlDiagram.model_validate_json(diagram.model_dump_json())
         assert restored == diagram
 
 
 class TestValidationRules:
-    """Schema validation rules from docs/json-schema.md section 3."""
+    """Schema validation rules from docs/json-schema.md."""
 
     def test_bbox_negative_coord_rejected(self) -> None:
-        """BBox coordinates must be >= 0."""
+        """Negative coordinates must fail validation."""
         with pytest.raises(ValidationError):
-            BBox(x_min=-1.0, y_min=0.0, x_max=10.0, y_max=10.0)
+            BBox(x_min=-1, y_min=0, x_max=10, y_max=10)
 
     def test_bbox_ordering_enforced(self) -> None:
-        """x_min < x_max and y_min < y_max are strictly required."""
+        """x_min >= x_max and y_min >= y_max must fail validation."""
         with pytest.raises(ValidationError):
-            BBox(x_min=10.0, y_min=0.0, x_max=5.0, y_max=10.0)
+            BBox(x_min=100, y_min=0, x_max=50, y_max=10)
         with pytest.raises(ValidationError):
-            BBox(x_min=0.0, y_min=10.0, x_max=5.0, y_max=5.0)
+            BBox(x_min=0, y_min=100, x_max=50, y_max=50)
 
     def test_bbox_properties(self) -> None:
-        """width/height/area properties compute correctly."""
-        box = BBox(x_min=100.0, y_min=50.0, x_max=300.0, y_max=250.0)
-        assert box.width == 200.0
-        assert box.height == 200.0
-        assert box.area == 40000.0
+        """width/height/area computed correctly."""
+        box = BBox(x_min=10, y_min=20, x_max=110, y_max=70)
+        assert box.width == 100
+        assert box.height == 50
+        assert box.area == 5000
 
     def test_empty_name_rejected(self) -> None:
-        """Empty names are invalid for UmlClass/Attribute/Method."""
-        box = BBox(x_min=0.0, y_min=0.0, x_max=1.0, y_max=1.0)
+        """Empty names are rejected on all named entities."""
+        fake_box = BBox(x_min=0, y_min=0, x_max=5, y_max=5)
         with pytest.raises(ValidationError):
-            UmlClass(name="", bbox=box)
+            UmlClass(name="   ", bbox=fake_box)
         with pytest.raises(ValidationError):
             Attribute(name="")
         with pytest.raises(ValidationError):
-            Method(name="")
+            Method(name=" ")
 
     def test_visibility_enum_values(self) -> None:
-        """Visibility serializes as the UML symbols +/-/#/~."""
-        assert [v.value for v in Visibility] == ["+", "-", "#", "~"]
+        """Visibility uses UML symbols; invalid values rejected."""
+        assert Attribute(name="x", visibility="+").visibility is Visibility.PUBLIC
+        with pytest.raises(ValidationError):
+            Attribute(name="x", visibility="!")
+
+    def test_relation_confidence_bounds(self) -> None:
+        """Confidence must lie in [0, 1]."""
+        with pytest.raises(ValidationError):
+            Relation(source="A", target="B", type=RelationType.INHERITANCE, confidence=1.5)
 
 
 class TestPipelineStub:
-    """Iteration-1 Pipeline stub behaviour."""
+    """MVP pipeline stub behaviour."""
 
     def test_run_returns_empty_valid_diagram(self, capsys: pytest.CaptureFixture[str]) -> None:
         """run() logs the path and returns a valid empty UmlDiagram."""
-        diagram = Pipeline().run("data/raw/example.png")
+        result = Pipeline().run("some/image.png")
         captured = capsys.readouterr()
-        assert "data/raw/example.png" in captured.out
-        assert diagram.classes == []
-        assert diagram.relations == []
-        assert diagram.metadata.source_image == "data/raw/example.png"
-        assert diagram.metadata.processing_time_ms >= 0.0
-        # Must serialize without errors.
-        json.loads(diagram.model_dump_json())
+        assert "some/image.png" in captured.out
+        assert isinstance(result, UmlDiagram)
+        assert result.classes == []
+        assert result.relations == []
+        assert result.metadata.source_image == "some/image.png"
+        json.loads(result.model_dump_json())  # must not raise

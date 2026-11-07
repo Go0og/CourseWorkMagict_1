@@ -1,6 +1,6 @@
-"""UML class diagram recognition from images (MVP, iteration 1)."""
+"""UML diagram recognition from images."""
 
 from uml_recognition.pipeline import Pipeline
 
-__all__ = ["Pipeline"]
 __version__ = "0.1.0"
+__all__ = ["Pipeline", "__version__"]

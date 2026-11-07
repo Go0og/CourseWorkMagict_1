@@ -1,8 +1,12 @@
-"""Relation model and relation type enum."""
+"""UML relation (edge) model."""
+
+from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+
+from uml_recognition.models.bbox import BBox
 
 
 class RelationType(str, Enum):
@@ -10,24 +14,39 @@ class RelationType(str, Enum):
 
     ASSOCIATION = "association"
     INHERITANCE = "inheritance"
-    DEPENDENCY = "dependency"
-    AGGREGATION = "aggregation"
     COMPOSITION = "composition"
+    AGGREGATION = "aggregation"
+    DEPENDENCY = "dependency"
+    REALIZATION = "realization"
 
 
 class Relation(BaseModel):
-    """A directed relation between two UML classes.
+    """A directed relation between two classes identified by their names.
+
+    Note:
+        Referential integrity (source/target must exist among diagram
+        classes) is enforced at the Pipeline level, not by this model.
 
     Attributes:
-        source_class_id: Name of the source class.
-        target_class_id: Name of the target class.
-        relation_type: Type of the UML relation.
-        multiplicity_source: Optional multiplicity at the source end.
-        multiplicity_target: Optional multiplicity at the target end.
+        source: Name of the source class.
+        target: Name of the target class.
+        type: Relation type.
+        label: Optional relation label.
+        bbox: Optional bounding box of the relation line/label.
+        confidence: Detection confidence in [0, 1].
     """
 
-    source_class_id: str
-    target_class_id: str
-    relation_type: RelationType
-    multiplicity_source: str | None = None
-    multiplicity_target: str | None = None
+    source: str
+    target: str
+    type: RelationType
+    label: str | None = None
+    bbox: BBox | None = None
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+    @field_validator("source", "target")
+    @classmethod
+    def endpoint_not_empty(cls, value: str) -> str:
+        """Reject empty class references."""
+        if not value.strip():
+            raise ValueError("Relation endpoint must reference a non-empty class name")
+        return value

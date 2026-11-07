@@ -1,7 +1,4 @@
-"""Pydantic v2 data models for the UML recognition module.
-
-Mirrors the output JSON schema defined in docs/json-schema.md.
-"""
+"""Data models for UML diagram extraction (Pydantic v2)."""
 
 from uml_recognition.models.attribute import Attribute, Visibility
 from uml_recognition.models.bbox import BBox

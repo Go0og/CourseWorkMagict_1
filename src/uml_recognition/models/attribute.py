@@ -1,4 +1,6 @@
-"""Visibility enum and UML attribute model."""
+"""UML class attribute model."""
+
+from __future__ import annotations
 
 from enum import Enum
 
@@ -6,7 +8,7 @@ from pydantic import BaseModel, field_validator
 
 
 class Visibility(str, Enum):
-    """UML visibility markers."""
+    """UML visibility modifiers."""
 
     PUBLIC = "+"
     PRIVATE = "-"
@@ -15,32 +17,22 @@ class Visibility(str, Enum):
 
 
 class Attribute(BaseModel):
-    """A single UML class attribute.
+    """A single class attribute (field).
 
     Attributes:
         name: Attribute name (non-empty).
-        type: Optional attribute type.
-        visibility: UML visibility marker, defaults to PUBLIC.
+        type_str: Declared type as string (OCR output), optional.
+        visibility: UML visibility modifier.
     """
 
     name: str
-    type: str | None = None
+    type_str: str | None = None
     visibility: Visibility = Visibility.PUBLIC
 
     @field_validator("name")
     @classmethod
     def name_not_empty(cls, value: str) -> str:
-        """Reject empty attribute names.
-
-        Args:
-            value: Candidate name.
-
-        Returns:
-            The validated name.
-
-        Raises:
-            ValueError: If the name is empty or whitespace only.
-        """
+        """Reject empty or whitespace-only names."""
         if not value.strip():
             raise ValueError("Attribute name must not be empty")
         return value
