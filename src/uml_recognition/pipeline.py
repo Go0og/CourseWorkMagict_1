@@ -1,34 +1,43 @@
-"""UML recognition pipeline (MVP stub for iteration 1)."""
+"""End-to-end UML recognition pipeline (MVP, iteration 2)."""
 
 from __future__ import annotations
 
 import time
 
 from uml_recognition.models import Metadata, UmlDiagram
+from uml_recognition.services.element_detector import ElementDetector
+from uml_recognition.services.image_loader import ImageLoader
+
+DEFAULT_IMAGE_PATH = "data/raw/test.png"
 
 
 class Pipeline:
     """Extracts a UML class diagram from an image.
 
-    Currently a stub: logs the input path and returns a valid but empty
-    UmlDiagram. Real CV/OCR stages arrive in later iterations.
+    Stage order: ImageLoader -> ElementDetector (YOLO stub for now).
+    Returns the diagram as a JSON-ready dict.
     """
 
-    def run(self, image_path: str) -> UmlDiagram:
+    def run(self, image_path: str = DEFAULT_IMAGE_PATH) -> dict:
         """Run the pipeline on an image and return the parsed diagram.
 
         Args:
             image_path: Path to the input image file.
 
         Returns:
-            A valid UmlDiagram object (empty lists with fake metadata in MVP).
+            JSON-serializable dict (Pydantic model_dump with mode="json")
+            of the extracted UmlDiagram with fresh processing metadata.
         """
         print(f"[Pipeline] Processing image: {image_path}")
-        start = time.perf_counter()
-        elapsed_ms = int((time.perf_counter() - start) * 1000)
-        metadata = Metadata(
+        start = time.time()
+
+        image, meta = ImageLoader().load(image_path)
+        result: UmlDiagram = ElementDetector().detect(image, meta)
+
+        processing_time_ms = max(int((time.time() - start) * 1000), 1)
+        result.metadata = Metadata(
             source_image=image_path,
-            processing_time_ms=max(elapsed_ms, 1),
+            processing_time_ms=processing_time_ms,
             schema_version="1.0",
         )
-        return UmlDiagram(classes=[], relations=[], metadata=metadata)
+        return result.model_dump(mode="json")

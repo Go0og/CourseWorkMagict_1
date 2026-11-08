@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import cv2
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
@@ -128,16 +131,20 @@ class TestValidationRules:
             Relation(source="A", target="B", type=RelationType.INHERITANCE, confidence=1.5)
 
 
-class TestPipelineStub:
-    """MVP pipeline stub behaviour."""
+class TestPipelineRun:
+    """Pipeline end-to-end run on a real (tiny) image."""
 
-    def test_run_returns_empty_valid_diagram(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """run() logs the path and returns a valid empty UmlDiagram."""
-        result = Pipeline().run("some/image.png")
+    def test_run_returns_valid_diagram_with_stub_data(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """run() logs the path and returns a dict with fake stub data."""
+        image_path = tmp_path / "img.png"
+        cv2.imwrite(str(image_path), np.zeros((20, 20, 3), dtype=np.uint8))
+        result = Pipeline().run(str(image_path))
         captured = capsys.readouterr()
-        assert "some/image.png" in captured.out
-        assert isinstance(result, UmlDiagram)
-        assert result.classes == []
-        assert result.relations == []
-        assert result.metadata.source_image == "some/image.png"
-        json.loads(result.model_dump_json())  # must not raise
+        assert str(image_path) in captured.out
+        assert isinstance(result, dict)
+        assert len(result["classes"]) >= 1
+        assert len(result["relations"]) >= 1
+        assert result["metadata"]["source_image"] == str(image_path)
+        assert UmlDiagram.model_validate(result).model_dump_json()
