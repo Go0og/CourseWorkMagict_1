@@ -1,77 +1,81 @@
-"""Element detection stage (YOLO stub for iteration 2)."""
+"""Element detection stage: OpenCV contour heuristic (iteration 3).
+
+Real YOLO is intentionally NOT used in v0.1 MVP (no dataset). Instead we
+find rectangle-like contours with Canny + findContours and treat them as
+candidate UML class boxes.
+"""
 
 from __future__ import annotations
 
+import cv2
 import numpy as np
 
-from uml_recognition.models import (
-    Attribute,
-    BBox,
-    Metadata,
-    Method,
-    Relation,
-    RelationType,
-    UmlClass,
-    UmlDiagram,
-    Visibility,
-)
+from uml_recognition.models import BBox
 
 
 class ElementDetector:
-    """Detects UML elements on an image.
+    """Detects candidate UML class rectangles on an image.
 
-    STUB: returns one fake class and one fake relation so the end-to-end
-    pipeline can be exercised before real YOLO/OCR integration.
+    Heuristic pipeline: grayscale -> GaussianBlur -> Canny -> findContours,
+    then filter by area and aspect ratio to keep only rectangle-like blobs.
     """
 
-    def detect(self, image: np.ndarray, meta: dict) -> UmlDiagram:
-        """Run detection on a loaded image.
+    def detect(self, image: np.ndarray) -> list[BBox]:
+        """Find bounding boxes of potential UML classes.
 
         Args:
-            image: Loaded image as numpy array (unused in the stub).
-            meta: Image metadata with "original_width"/"original_height".
+            image: Loaded BGR image as numpy array.
 
         Returns:
-            A valid UmlDiagram containing fake test data scaled to the
-            image dimensions.
+            List of BBox objects for contours with area > 5000 px and
+            aspect ratio within [0.5, 2.0].
         """
-        print("[ElementDetector] Stub detection (fake data)")
-        width = int(meta["original_width"])
-        height = int(meta["original_height"])
+        print("[ElementDetector] Contour-based detection (OpenCV heuristic)")
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+        # Close small gaps so rectangle borders form a single contour.
+        edges = cv2.dilate(edges, np.ones((3, 3), dtype=np.uint8))
 
-        x_min = max(width // 10, 0)
-        y_min = max(height // 10, 0)
-        x_max = max(int(x_min + width * 0.3), x_min + 1)
-        y_max = max(int(y_min + height * 0.3), y_min + 1)
+        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
-        fake_class = UmlClass(
-            name="FakeUser",
-            attributes=[Attribute(name="login", type_str="str", visibility=Visibility.PRIVATE)],
-            methods=[Method(name="login", return_type="bool", visibility=Visibility.PUBLIC)],
-            bbox=BBox(x_min=x_min, y_min=y_min, x_max=x_max, y_max=y_max),
-            confidence=0.95,
-        )
-        fake_target = UmlClass(
-            name="FakeSession",
-            attributes=[Attribute(name="token", type_str="str", visibility=Visibility.PRIVATE)],
-            methods=[],
-            bbox=BBox(
-                x_min=min(int(x_max + width * 0.2), max(width - 2, 1)),
-                y_min=y_min,
-                x_max=max(width - 1, 2),
-                y_max=y_max,
-            ),
-            confidence=0.9,
-        )
-        relation = Relation(
-            source=fake_class.name,
-            target=fake_target.name,
-            type=RelationType.ASSOCIATION,
-            label="has",
-            confidence=0.85,
-        )
-        return UmlDiagram(
-            classes=[fake_class, fake_target],
-            relations=[relation],
-            metadata=Metadata(source_image="stub", processing_time_ms=1),
-        )
+        height, width = image.shape[:2]
+        candidates: list[tuple[int, int, int, int]] = []
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            if w <= 0 or h <= 0:
+                continue
+            # Rectangle-likeness: bounding-box area vs filled contour area.
+            fill_ratio = cv2.contourArea(contour) / float(w * h)
+            if fill_ratio < 0.9:
+                continue
+            area = w * h
+            if area <= 5000:
+                continue
+            aspect_ratio = w / h
+            if not 0.5 <= aspect_ratio <= 2.0:
+                continue
+            x_min, y_min = max(int(x), 0), max(int(y), 0)
+            x_max, y_max = min(int(x + w), width), min(int(y + h), height)
+            if x_min >= x_max or y_min >= y_max:
+                continue
+            candidates.append((x_min, y_min, x_max, y_max))
+
+        # Drop boxes fully contained inside larger boxes (nested contours).
+        boxes: list[BBox] = []
+        for box in candidates:
+            if any(
+                other != box
+                and other[0] <= box[0]
+                and other[1] <= box[1]
+                and box[2] <= other[2]
+                and box[3] <= other[3]
+                and (box[2] - box[0]) * (box[3] - box[1])
+                < (other[2] - other[0]) * (other[3] - other[1])
+                for other in candidates
+            ):
+                continue
+            boxes.append(BBox(x_min=box[0], y_min=box[1], x_max=box[2], y_max=box[3]))
+
+        print(f"[ElementDetector] Found {len(boxes)} candidate class box(es)")
+        return boxes
