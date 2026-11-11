@@ -13,6 +13,8 @@ dependencies = [
     "opencv-python",
     "numpy",
     "pillow",
+    "paddleocr>=2.7",
+    "paddlepaddle>=2.6",
 ]
 
 [project.optional-dependencies]
