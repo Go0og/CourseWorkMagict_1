@@ -25,7 +25,7 @@ class _FakePaddleOCR:
     def __init__(self, *args, **kwargs) -> None:
         """Accept and ignore any constructor kwargs."""
 
-    def ocr(self, img, cls=True):  # noqa: ANN001, ANN201 - mimic PaddleOCR API
+    def ocr(self, img, cls=True):
         """Return PaddleOCR-shaped results with fixed text lines."""
         entries = [([[[0, 0], [10, 0], [10, 10], [0, 10]], (line, 0.99)] for line in _MOCK_OCR_LINES)]
         return [[entries]]
@@ -35,8 +35,8 @@ _fake_module = types.ModuleType("paddleocr")
 _fake_module.PaddleOCR = _FakePaddleOCR
 sys.modules.setdefault("paddleocr", _fake_module)
 
-from uml_recognition.pipeline import DEFAULT_IMAGE_PATH, Pipeline  # noqa: E402
-from uml_recognition.services.image_loader import ImageLoader  # noqa: E402
+from uml_recognition.pipeline import DEFAULT_IMAGE_PATH, Pipeline
+from uml_recognition.services.image_loader import ImageLoader
 
 
 @pytest.fixture()

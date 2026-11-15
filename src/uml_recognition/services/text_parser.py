@@ -12,7 +12,7 @@ import re
 
 import numpy as np
 
-from uml_recognition.models import Attribute, BBox, Method, UmlClass, Visibility
+from uml_recognition.models import Attribute, BBox, Method, Parameter, UmlClass, Visibility
 
 _VISIBILITY_BY_SYMBOL: dict[str, Visibility] = {
     "+": Visibility.PUBLIC,
@@ -70,15 +70,48 @@ class TextParser:
             print(f"[TextParser] OCR failed: {exc}")
             return []
         lines: list[str] = []
-        for page in raw or []:
-            for entry in page or []:
-                try:
-                    text = str(entry[1][0]).strip()
-                except (IndexError, TypeError):
-                    continue
-                if text:
-                    lines.append(text)
-        return lines
+        for page in self._as_sequence(raw):
+            for entry in self._as_sequence(page):
+                lines.extend(self._collect_texts(entry))
+        return [line for line in lines if line]
+
+    @staticmethod
+    def _as_sequence(node: object) -> list:
+        """Return an iterable node (list/generator/tuple) as a plain list."""
+        if isinstance(node, (list, tuple)):
+            return list(node)
+        if hasattr(node, "__iter__") and not isinstance(node, (str, bytes, dict)):
+            try:
+                return list(node)  # type: ignore[call-overload]
+            except TypeError:
+                return []
+        return []
+
+    @classmethod
+    def _collect_texts(cls, node: object) -> list[str]:
+        """Recursively collect recognized strings from one OCR result node.
+
+        Handles both the classic PaddleOCR format ``[box, (text, conf)]``
+        and the newer nested layouts (lists/dicts with a "text" key).
+
+        Args:
+            node: Any element of the raw OCR response.
+
+        Returns:
+            Recognized text strings found under this node, top to bottom.
+        """
+        if isinstance(node, tuple):
+            head = str(node[0]).strip() if node else ""
+            return [head] if head else []
+        if isinstance(node, dict):
+            text = str(node.get("text", "")).strip()
+            return [text] if text else []
+        if isinstance(node, np.ndarray):
+            node = node.tolist()
+        results: list[str] = []
+        for child in cls._as_sequence(node):
+            results.extend(cls._collect_texts(child))
+        return results
 
     def _lines_to_class(self, lines: list[str], bbox: BBox) -> UmlClass:
         """Convert raw OCR lines into a UmlClass via simple heuristics.
@@ -130,18 +163,16 @@ class TextParser:
         head = head.strip()
         method_name = head if re.fullmatch(r"[A-Za-z_][\w]*", head) else head or "run"
         params_part = tail.split(")")[0] if sep else ""
-        parameters = []
+        parameters: list[tuple[str, str | None]] = []
         for chunk in params_part.split(","):
             param_name, _, param_type = chunk.partition(":")
             param_name = param_name.strip()
             if re.fullmatch(r"[A-Za-z_][\w]*", param_name):
                 parameters.append((param_name, param_type.strip() or None))
         return_type = tail.split(")", 1)[-1].lstrip(":").strip() or None
-        method_kwargs: dict = {"name": method_name, "return_type": return_type, "visibility": visibility}
-        if parameters:
-            from uml_recognition.models import Parameter
-
-            method_kwargs["parameters"] = [
-                Parameter(name=p_name, type_str=p_type) for p_name, p_type in parameters
-            ]
-        return Method(**method_kwargs)
+        return Method(
+            name=method_name,
+            parameters=[Parameter(name=p_name, type_str=p_type) for p_name, p_type in parameters],
+            return_type=return_type,
+            visibility=visibility,
+        )

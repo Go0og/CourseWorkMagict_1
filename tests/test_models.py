@@ -134,17 +134,17 @@ class TestValidationRules:
 class TestPipelineRun:
     """Pipeline end-to-end run on a real (tiny) image."""
 
-    def test_run_returns_valid_diagram_with_stub_data(
+    def test_run_on_blank_image_returns_valid_empty_diagram(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        """run() logs the path and returns a dict with fake stub data."""
+        """run() logs the path; a blank image yields a valid empty diagram."""
         image_path = tmp_path / "img.png"
         cv2.imwrite(str(image_path), np.zeros((20, 20, 3), dtype=np.uint8))
         result = Pipeline().run(str(image_path))
         captured = capsys.readouterr()
         assert str(image_path) in captured.out
         assert isinstance(result, dict)
-        assert len(result["classes"]) >= 1
-        assert len(result["relations"]) >= 1
+        assert result["classes"] == []
+        assert result["relations"] == []
         assert result["metadata"]["source_image"] == str(image_path)
         assert UmlDiagram.model_validate(result).model_dump_json()
