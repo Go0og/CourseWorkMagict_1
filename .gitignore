@@ -6,3 +6,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# demo artifacts
+data/raw/demo_diagram.png
+data/raw/result.json

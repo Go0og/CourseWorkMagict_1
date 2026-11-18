@@ -19,12 +19,12 @@ class Pipeline:
     """Extracts a UML class diagram from an image.
 
     Stage order: ImageLoader -> ElementDetector (OpenCV contours) ->
-    TextParser (PaddleOCR) -> RelationResolver (stub) -> JSON export.
-    Returns the diagram as a JSON-ready dict.
+    TextParser (pytesseract with PaddleOCR fallback) -> RelationResolver
+    (HoughLinesP) -> JSON export. Returns the diagram as a JSON-ready dict.
     """
 
     def __init__(self) -> None:
-        """Instantiate pipeline services (TextParser loads PaddleOCR models)."""
+        """Instantiate pipeline services (TextParser picks the OCR engine)."""
         self.image_loader = ImageLoader()
         self.element_detector = ElementDetector()
         self.text_parser = TextParser()
@@ -76,8 +76,8 @@ class Pipeline:
                 continue
             classes.append(self.text_parser.parse(crop, bbox))
 
-        # Stage 4: resolve relations (stub -> empty list for now).
-        relations = self.relation_resolver.resolve(classes, lines=[])
+        # Stage 4: resolve relations via Hough line detection.
+        relations = self.relation_resolver.resolve(image, classes)
 
         processing_time_ms = max(int((time.time() - start) * 1000), 1)
         result = UmlDiagram(
