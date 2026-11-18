@@ -1,8 +1,8 @@
-"""Element detection stage: classic OpenCV contour detection (iteration 3).
+"""Element detection stage: OpenCV contour heuristic (iteration 3).
 
-Finds rectangles that are likely UML class boxes on a diagram image.
-YOLOv8-based detection is planned for iteration 4; this MVP uses only
-classical computer vision (grayscale -> blur -> Canny -> contours).
+Real YOLO is intentionally NOT used in v0.1 MVP (no dataset). Instead we
+find rectangle-like contours with Canny + findContours and treat them as
+candidate UML class boxes.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from uml_recognition.models import BBox
 
 
 class ElementDetector:
-    """Detects candidate UML class rectangles via OpenCV contours.
+    """Detects candidate UML class rectangles on an image.
 
     Pipeline within ``detect_bboxes``:
         1. Convert to grayscale (cv2.cvtColor).
@@ -35,20 +35,20 @@ class ElementDetector:
         """Find bounding boxes of potential UML classes in the image.
 
         Args:
-            image: Loaded image as a numpy array (BGR or grayscale).
+            image: Loaded BGR image as numpy array.
 
         Returns:
-            List of BBox objects for detected rectangle candidates,
-            ordered top-to-bottom, left-to-right.
+            List of BBox objects for contours with area > 5000 px and
+            aspect ratio within [0.5, 2.0].
         """
-        print("[ElementDetector] Running classic OpenCV contour detection")
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        print("[ElementDetector] Contour-based detection (OpenCV heuristic)")
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blurred, threshold1=50, threshold2=150)
-        # Close small gaps so rectangle borders form complete contours.
-        closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+        edges = cv2.Canny(blurred, 50, 150)
+        # Close small gaps so rectangle borders form a single contour.
+        edges = cv2.dilate(edges, np.ones((3, 3), dtype=np.uint8))
 
-        contours, _ = cv2.findContours(closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
         # Adaptive area threshold: 1% of the image, but never below 1000 px.
         h_img, w_img = image.shape[:2]
@@ -63,20 +63,21 @@ class ElementDetector:
             x, y, w, h = cv2.boundingRect(contour)
             if w <= 0 or h <= 0:
                 continue
+            # Rectangle-likeness: bounding-box area vs filled contour area.
+            fill_ratio = cv2.contourArea(contour) / float(w * h)
+            if fill_ratio < 0.9:
+                continue
+            area = w * h
+            if area <= 5000:
+                continue
             aspect_ratio = w / h
-            if not self.MIN_ASPECT_RATIO <= aspect_ratio <= self.MAX_ASPECT_RATIO:
+            if not 0.5 <= aspect_ratio <= 2.0:
                 continue
-            # The contour must look like a rectangle (4 corners).
-            perimeter = cv2.arcLength(contour, True)
-            approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
-            if len(approx) != 4:
+            x_min, y_min = max(int(x), 0), max(int(y), 0)
+            x_max, y_max = min(int(x + w), width), min(int(y + h), height)
+            if x_min >= x_max or y_min >= y_max:
                 continue
-            try:
-                bboxes.append(
-                    BBox(x_min=int(x), y_min=int(y), x_max=int(x + w), y_max=int(y + h))
-                )
-            except ValueError:
-                print(f"[ElementDetector] Skipping invalid bbox at ({x}, {y}, {w}, {h})")
+            candidates.append((x_min, y_min, x_max, y_max))
 
         bboxes = self._drop_nested(bboxes)
         bboxes.sort(key=lambda b: (b.y_min, b.x_min))

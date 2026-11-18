@@ -3,5 +3,7 @@
 MVP-модуль извлечения UML-диаграмм из изображений в структурированный JSON (Pydantic v2).
 
 ## Быстрый старт
-
-Вайбкодинг с qwen & qwen coder
+```bash
+pip install -e ".[dev]"
+pytest
+```

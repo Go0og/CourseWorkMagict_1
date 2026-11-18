@@ -1,4 +1,4 @@
-"""End-to-end UML recognition pipeline (MVP, iteration 3: real CV + OCR)."""
+"""End-to-end UML recognition pipeline (v0.1 MVP, iteration 3)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 
-from uml_recognition.models import BBox, Metadata, UmlClass, UmlDiagram
+from uml_recognition.models import BBox, Metadata, UmlDiagram
 from uml_recognition.services.element_detector import ElementDetector
 from uml_recognition.services.image_loader import ImageLoader
 from uml_recognition.services.relation_resolver import RelationResolver
@@ -49,7 +49,7 @@ class Pipeline:
         return image[y_min:y_max, x_min:x_max]
 
     def run(self, image_path: str = DEFAULT_IMAGE_PATH) -> dict:
-        """Run the pipeline on an image and return the parsed diagram.
+        """Run the full pipeline on an image and return the parsed diagram.
 
         Args:
             image_path: Path to the input image file.
@@ -61,11 +61,11 @@ class Pipeline:
         print(f"[Pipeline] Processing image: {image_path}")
         start = time.time()
 
-        # Stage 1: load image.
-        image, _meta = self.image_loader.load(image_path)
+        image, _meta = ImageLoader().load(image_path)
+        boxes: list[BBox] = ElementDetector().detect(image)
 
-        # Stage 2: find candidate class rectangles (classic OpenCV).
-        bboxes = self.element_detector.detect_bboxes(image)
+        parser = TextParser()
+        classes = [parser.parse(self._crop(image, box), box) for box in boxes]
 
         # Stage 3: OCR + parse each rectangle into a UmlClass.
         classes: list[UmlClass] = []
@@ -89,6 +89,17 @@ class Pipeline:
                 schema_version="1.0",
             ),
         )
-        print(f"[Pipeline] Done: {len(classes)} classes, {len(relations)} relations "
-              f"in {processing_time_ms} ms")
         return result.model_dump(mode="json")
+
+    @staticmethod
+    def _crop(image: np.ndarray, bbox: BBox) -> np.ndarray:
+        """Cut out the region of interest described by a bounding box.
+
+        Args:
+            image: Full loaded BGR image.
+            bbox: Region to extract.
+
+        Returns:
+            The cropped BGR image for OCR parsing.
+        """
+        return image[bbox.y_min : bbox.y_max, bbox.x_min : bbox.x_max]
