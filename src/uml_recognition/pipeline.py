@@ -1,5 +1,4 @@
-"""End-to-end UML recognition pipeline (MVP, iteration 3: real CV + OCR)."""
-
+"""End-to-end UML recognition pipeline (MVP)."""
 from __future__ import annotations
 
 import time
@@ -16,15 +15,9 @@ DEFAULT_IMAGE_PATH = "data/raw/test.png"
 
 
 class Pipeline:
-    """Extracts a UML class diagram from an image.
-
-    Stage order: ImageLoader -> ElementDetector (OpenCV contours) ->
-    TextParser (pytesseract with PaddleOCR fallback) -> RelationResolver
-    (HoughLinesP) -> JSON export. Returns the diagram as a JSON-ready dict.
-    """
+    """Extracts a UML class diagram from an image."""
 
     def __init__(self) -> None:
-        """Instantiate pipeline services (TextParser picks the OCR engine)."""
         self.image_loader = ImageLoader()
         self.element_detector = ElementDetector()
         self.text_parser = TextParser()
@@ -32,15 +25,7 @@ class Pipeline:
 
     @staticmethod
     def _crop(image: np.ndarray, bbox: BBox) -> np.ndarray:
-        """Cut out the rectangle region described by bbox from the image.
-
-        Args:
-            image: Full loaded image (numpy array).
-            bbox: Region to extract.
-
-        Returns:
-            The image crop ``image[y_min:y_max, x_min:x_max]``.
-        """
+        """Cut out the rectangle region described by bbox from the image."""
         height, width = image.shape[:2]
         x_min = max(bbox.x_min, 0)
         y_min = max(bbox.y_min, 0)
@@ -49,28 +34,38 @@ class Pipeline:
         return image[y_min:y_max, x_min:x_max]
 
     def run(self, image_path: str = DEFAULT_IMAGE_PATH) -> dict:
-        """Run the pipeline on an image and return the parsed diagram.
-
-        Args:
-            image_path: Path to the input image file.
-
-        Returns:
-            JSON-serializable dict (Pydantic model_dump with mode="json")
-            of the extracted UmlDiagram with fresh processing metadata.
-        """
+        """Run the pipeline on an image and return the parsed diagram."""
         print(f"[Pipeline] Processing image: {image_path}")
         start = time.time()
 
         # Stage 1: load image.
         image, _meta = self.image_loader.load(image_path)
+        original_image = image.copy()  # Сохраняем оригинал для OCR
 
         # Stage 2: find candidate class rectangles (classic OpenCV).
         bboxes = self.element_detector.detect_bboxes(image)
 
+        # Разбиваем боксы, охватывающие >35% площади (склеенные классы)
+        h_img, w_img = image.shape[:2]
+        img_area = h_img * w_img
+        expanded_bboxes = []
+        for bbox in bboxes:
+            bbox_area = (bbox.x_max - bbox.x_min) * (bbox.y_max - bbox.y_min)
+            if bbox_area > img_area * 0.35:
+                mid_y = (bbox.y_min + bbox.y_max) // 2
+                expanded_bboxes.append(BBox(x_min=bbox.x_min, y_min=bbox.y_min,
+                                            x_max=bbox.x_max, y_max=mid_y))
+                expanded_bboxes.append(BBox(x_min=bbox.x_min, y_min=mid_y,
+                                            x_max=bbox.x_max, y_max=bbox.y_max))
+                print(f"[Pipeline] Split large bbox at y={mid_y}")
+            else:
+                expanded_bboxes.append(bbox)
+        bboxes = expanded_bboxes
+
         # Stage 3: OCR + parse each rectangle into a UmlClass.
         classes: list[UmlClass] = []
         for bbox in bboxes:
-            crop = self._crop(image, bbox)
+            crop = self._crop(original_image, bbox)  # Используем оригинал для OCR
             if crop.size == 0:
                 print(f"[Pipeline] Empty crop for bbox {bbox}, skipping")
                 continue

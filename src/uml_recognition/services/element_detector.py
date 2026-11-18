@@ -1,10 +1,4 @@
-"""Element detection stage: classic OpenCV contour detection (iteration 3).
-
-Finds rectangles that are likely UML class boxes on a diagram image.
-YOLOv8-based detection is planned for iteration 4; this MVP uses only
-classical computer vision (grayscale -> blur -> Canny -> contours).
-"""
-
+"""Element detection: classic OpenCV contour detection."""
 from __future__ import annotations
 
 import cv2
@@ -14,17 +8,7 @@ from uml_recognition.models import BBox
 
 
 class ElementDetector:
-    """Detects candidate UML class rectangles via OpenCV contours.
-
-    Pipeline within ``detect_bboxes``:
-        1. Convert to grayscale (cv2.cvtColor).
-        2. Reduce noise (cv2.GaussianBlur).
-        3. Find edges (cv2.Canny).
-        4. Extract contours (cv2.findContours).
-        5. Keep near-rectangular contours with an adaptive minimum area
-           (``max(1000, 1% of the image)``) and an aspect ratio between
-           0.3 and 3.0 so small PlantUML boxes are not filtered out.
-    """
+    """Detects candidate UML class rectangles via OpenCV contours."""
 
     MIN_ASPECT_RATIO: float = 0.3
     MAX_ASPECT_RATIO: float = 3.0
@@ -32,25 +16,21 @@ class ElementDetector:
     MIN_AREA_FLOOR: int = 1000
 
     def detect_bboxes(self, image: np.ndarray) -> list[BBox]:
-        """Find bounding boxes of potential UML classes in the image.
+        """Find bounding boxes of potential UML classes in the image."""
+        # Автоинверсия для светлого фона (PlantUML и т.п.)
+        mean_brightness = float(cv2.mean(image)[0])
+        if mean_brightness > 127:
+            image = cv2.bitwise_not(image)
+            print(f"[ElementDetector] Inverted image (mean brightness={mean_brightness:.0f})")
 
-        Args:
-            image: Loaded image as a numpy array (BGR or grayscale).
-
-        Returns:
-            List of BBox objects for detected rectangle candidates,
-            ordered top-to-bottom, left-to-right.
-        """
         print("[ElementDetector] Running classic OpenCV contour detection")
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         edges = cv2.Canny(blurred, threshold1=50, threshold2=150)
-        # Close small gaps so rectangle borders form complete contours.
         closed = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+        # ВАЖНО: RETR_EXTERNAL берёт только внешние контуры (целые классы)
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        contours, _ = cv2.findContours(closed, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-
-        # Adaptive area threshold: 1% of the image, but never below 1000 px.
         h_img, w_img = image.shape[:2]
         min_area = max(self.MIN_AREA_FLOOR, (w_img * h_img) * self.AREA_FRACTION)
         print(f"[ElementDetector] Image {w_img}x{h_img}, adaptive min_area={min_area:.0f}")
@@ -66,10 +46,10 @@ class ElementDetector:
             aspect_ratio = w / h
             if not self.MIN_ASPECT_RATIO <= aspect_ratio <= self.MAX_ASPECT_RATIO:
                 continue
-            # The contour must look like a rectangle (4 corners).
+            # PlantUML-рамка с иконкой может дать 4-14 углов
             perimeter = cv2.arcLength(contour, True)
             approx = cv2.approxPolyDP(contour, 0.02 * perimeter, True)
-            if len(approx) != 4:
+            if len(approx) < 4 or len(approx) > 14:
                 continue
             try:
                 bboxes.append(
@@ -85,19 +65,7 @@ class ElementDetector:
 
     @staticmethod
     def _drop_nested(bboxes: list[BBox], tolerance: int = 6) -> list[BBox]:
-        """Remove boxes that are nested inside other boxes with ~equal area.
-
-        Canny detects both outer and inner edges of a thick rectangle
-        border; keeping only the outer box avoids duplicate classes.
-
-        Args:
-            bboxes: Raw detected bounding boxes.
-            tolerance: Max coordinate difference treated as "same box".
-
-        Returns:
-            Filtered list without nested duplicates (smallest kept first
-            is not assumed; order-independent).
-        """
+        """Remove boxes that are nested inside other boxes."""
         result: list[BBox] = []
         for box in bboxes:
             dominated = False
@@ -107,7 +75,7 @@ class ElementDetector:
                     dominated = True
                     break
                 if _contains(box, other, tolerance):
-                    continue  # drop the previously kept inner box
+                    continue
                 keep.append(other)
             if dominated:
                 continue
@@ -117,7 +85,7 @@ class ElementDetector:
 
 
 def _contains(outer: BBox, inner: BBox, tolerance: int) -> bool:
-    """True if ``inner`` lies within ``outer`` expanded by ``tolerance``."""
+    """True if `inner` lies within `outer` expanded by `tolerance`."""
     return (outer.x_min - tolerance <= inner.x_min
             and outer.y_min - tolerance <= inner.y_min
             and outer.x_max + tolerance >= inner.x_max
